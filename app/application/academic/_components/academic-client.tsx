@@ -7,13 +7,29 @@ import { useApplication } from '../../_components/use-application';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Save, ArrowRight, ArrowLeft, Plus, Trash2, Upload } from 'lucide-react';
+import { Save, ArrowRight, ArrowLeft, Plus, Trash2, Upload, CheckCircle2 } from 'lucide-react';
 import { AG_SUBJECTS } from '@/lib/constants';
 import { toast } from 'sonner';
 
 export function AcademicClient() {
-  const { data, updateField, saving, save, appId } = useApplication(2);
-  const [uploading, setUploading] = useState(false);
+  const { data, updateField, saving, save, appId, app } = useApplication(2);
+  const [uploadingDocuments, setUploadingDocuments] = useState<Record<string, boolean>>({});
+  const [uploadedDocuments, setUploadedDocuments] = useState<Record<string, { filename: string }>>({});
+
+  const savedDocuments = (app?.documents ?? []) as {
+    documentType: string;
+    filename: string;
+    uploadedAt?: string | Date;
+  }[];
+  const persistedDocuments: Record<string, { filename: string }> = {};
+  for (const document of [...savedDocuments].sort((first, second) => (
+    new Date(second.uploadedAt ?? 0).getTime() - new Date(first.uploadedAt ?? 0).getTime()
+  ))) {
+    if (!(document.documentType in persistedDocuments)) {
+      persistedDocuments[document.documentType] = { filename: document.filename };
+    }
+  }
+  const completedDocuments = { ...persistedDocuments, ...uploadedDocuments };
 
   const colleges = data?.colleges ?? [];
   const addCollege = () => updateField('colleges', [...colleges, { name: '', city: '', state: '', startDate: '', endDate: '', degree: '', units: '', gpa: '' }]);
@@ -30,24 +46,34 @@ export function AcademicClient() {
 
   const handleUpload = async (file: File, docType: string) => {
     if (!appId) { toast.error('No application found'); return; }
+    if (file.size === 0) { toast.error('The selected file is empty'); return; }
     if (file.size > 10 * 1024 * 1024) { toast.error('File exceeds 10MB limit'); return; }
-    setUploading(true);
+    setUploadingDocuments((current) => ({ ...current, [docType]: true }));
     try {
       const presignRes = await fetch('/api/upload/presigned', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size }),
       });
-      if (!presignRes.ok) { toast.error('Upload failed'); return; }
-      const { uploadUrl, cloud_storage_path } = await presignRes.json();
-      await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-      await fetch('/api/documents', {
+      const presignData = await presignRes.json();
+      if (!presignRes.ok) throw new Error(presignData.error ?? 'Could not prepare the upload');
+      const { uploadUrl, cloud_storage_path } = presignData;
+      const fileRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      if (!fileRes.ok) throw new Error('The file could not be stored. Please try again.');
+      const documentRes = await fetch('/api/documents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ applicationId: appId, documentType: docType, filename: file.name, cloudStoragePath: cloud_storage_path, contentType: file.type }),
       });
+      const document = await documentRes.json();
+      if (!documentRes.ok) throw new Error(document.error ?? 'The uploaded file could not be attached to your application');
+      setUploadedDocuments((current) => ({ ...current, [docType]: { filename: document.filename } }));
       toast.success(`${file.name} uploaded successfully!`);
-    } catch { toast.error('Upload failed'); } finally { setUploading(false); }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Upload failed. Please try again.');
+    } finally {
+      setUploadingDocuments((current) => ({ ...current, [docType]: false }));
+    }
   };
 
   return (
@@ -171,13 +197,32 @@ export function AcademicClient() {
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.png"
                     className="hidden"
-                    onChange={(e) => { const f = e.target?.files?.[0]; if (f) handleUpload(f, docType); }}
-                    disabled={uploading}
+                    onChange={(e) => {
+                      const input = e.currentTarget;
+                      const file = input.files?.[0];
+                      input.value = '';
+                      if (file) void handleUpload(file, docType);
+                    }}
+                    disabled={uploadingDocuments[docType]}
                   />
-                  <Button variant="outline" size="sm" disabled={uploading} asChild>
-                    <span><Upload className="w-4 h-4 mr-1" />{uploading ? 'Uploading...' : 'Upload File'}</span>
+                  <Button variant="outline" size="sm" disabled={uploadingDocuments[docType]} asChild>
+                    <span>
+                      {uploadingDocuments[docType] ? (
+                        <><Upload className="w-4 h-4 mr-1 animate-pulse" />Uploading...</>
+                      ) : completedDocuments[docType] ? (
+                        <><CheckCircle2 className="w-4 h-4 mr-1 text-green-600" />Uploaded</>
+                      ) : (
+                        <><Upload className="w-4 h-4 mr-1" />Upload File</>
+                      )}
+                    </span>
                   </Button>
                 </label>
+                {completedDocuments[docType] && (
+                  <p className="mt-2 flex items-center gap-1 text-xs text-green-700" role="status">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    {completedDocuments[docType].filename} uploaded successfully
+                  </p>
+                )}
               </div>
             ))}
           </CardContent>

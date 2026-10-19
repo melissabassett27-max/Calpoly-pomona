@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
+import { getSectionCompletionIssues } from '@/lib/application-validation';
 
 export async function POST(request: Request) {
   try {
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const session = await auth();
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -36,7 +37,11 @@ export async function GET(request: Request) {
     const app = await prisma.application.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      include: { documents: true, portalStatus: true },
+      include: {
+        documents: { orderBy: { uploadedAt: 'desc' } },
+        payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        portalStatus: true,
+      },
     });
     return NextResponse.json(app);
   } catch (error: any) {
@@ -51,6 +56,22 @@ export async function PUT(request: Request) {
     const userId = (session.user as any)?.id;
     const body = await request.json();
     const { applicationId, section, data, complete } = body;
+
+    if (!Number.isInteger(section) || section < 1 || section > 4) {
+      return NextResponse.json({ error: 'A valid application section is required.' }, { status: 400 });
+    }
+    if (typeof complete !== 'undefined' && typeof complete !== 'boolean') {
+      return NextResponse.json({ error: 'Section completion must be true or false.' }, { status: 400 });
+    }
+    if (typeof complete === 'boolean' && (typeof data !== 'object' || data === null || Array.isArray(data))) {
+      return NextResponse.json({ error: 'Section data must be an object.' }, { status: 400 });
+    }
+    if (complete === true) {
+      const issues = getSectionCompletionIssues(section, data);
+      if (issues.length > 0) {
+        return NextResponse.json({ error: `Please complete: ${issues.join(', ')}.` }, { status: 400 });
+      }
+    }
 
     const app = await prisma.application.findFirst({
       where: { id: applicationId, userId },

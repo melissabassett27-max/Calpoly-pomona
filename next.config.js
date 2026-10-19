@@ -3,9 +3,6 @@ const path = require('path');
 const nextConfig = {
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   images: { unoptimized: true },
   allowedDevOrigins: ['127.0.0.1'],
 };
@@ -24,4 +21,3 @@ if (fs.existsSync(userConfigPath)) {
 }
 
 module.exports = nextConfig;
-

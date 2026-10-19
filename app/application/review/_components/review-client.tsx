@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { CheckCircle2, XCircle, Edit, Loader2, ArrowRight, Shield } from 'lucide-react';
 import { ApplicationStepper } from '../../_components/application-stepper';
+import { getSectionCompletionIssues } from '@/lib/application-validation';
 
 export function ReviewClient() {
   const [app, setApp] = useState<any>(null);
@@ -46,9 +47,13 @@ export function ReviewClient() {
   const s3 = app?.section3Data ?? {};
   const s4 = app?.section4Data ?? {};
   const appId = app?.id ?? '';
+  const section1Issues = getSectionCompletionIssues(1, s1);
+  const section2Issues = getSectionCompletionIssues(2, s2);
+  const section3Issues = getSectionCompletionIssues(3, s3);
+  const section4Issues = getSectionCompletionIssues(4, s4);
 
   const sections = [
-    { num: 1, title: 'Personal Information', complete: app?.section1Complete, slug: 'personal', items: [
+    { num: 1, title: 'Personal Information', complete: app?.section1Complete && section1Issues.length === 0, issues: section1Issues, slug: 'personal', items: [
       ['Name', `${s1?.firstName ?? ''} ${s1?.middleName ?? ''} ${s1?.lastName ?? ''}`],
       ['Date of Birth', s1?.dateOfBirth ?? 'Not provided'],
       ['Citizenship', s1?.citizenship ?? 'Not provided'],
@@ -57,7 +62,7 @@ export function ReviewClient() {
       ['Address', `${s1?.street ?? ''}, ${s1?.city ?? ''} ${s1?.state ?? ''} ${s1?.zip ?? ''}`],
       ['Emergency Contact', `${s1?.emergencyName ?? ''} (${s1?.emergencyRelationship ?? ''})`],
     ]},
-    { num: 2, title: 'Academic History', complete: app?.section2Complete, slug: 'academic', items: [
+    { num: 2, title: 'Academic History', complete: app?.section2Complete && section2Issues.length === 0, issues: section2Issues, slug: 'academic', items: [
       ['High School', `${s2?.hsName ?? 'Not provided'}, ${s2?.hsCity ?? ''} ${s2?.hsState ?? ''}`],
       ['HS GPA', s2?.hsGpa ?? 'Not provided'],
       ['A-G Complete', s2?.agComplete ?? 'Not provided'],
@@ -65,14 +70,14 @@ export function ReviewClient() {
       ['ACT', s2?.actScore || 'Not submitted'],
       ['Colleges Attended', `${(s2?.colleges ?? []).length} listed`],
     ]},
-    { num: 3, title: 'Supporting Information', complete: app?.section3Complete, slug: 'supporting', items: [
+    { num: 3, title: 'Supporting Information', complete: app?.section3Complete && section3Issues.length === 0, issues: section3Issues, slug: 'supporting', items: [
       ['Work Experience', `${(s3?.work ?? []).length} entries`],
       ['Activities', `${(s3?.activities ?? []).length} entries`],
       ['Awards', `${(s3?.awards ?? []).length} entries`],
       ['Essay 1', s3?.essay1 ? `${(s3.essay1 as string).split(/\s+/).filter(Boolean).length} words` : 'Not written'],
       ['Essay 2', s3?.essay2 ? `${(s3.essay2 as string).split(/\s+/).filter(Boolean).length} words` : 'Not written'],
     ]},
-    { num: 4, title: 'Program Materials', complete: app?.section4Complete, slug: 'program', items: [
+    { num: 4, title: 'Program Materials', complete: app?.section4Complete && section4Issues.length === 0, issues: section4Issues, slug: 'program', items: [
       ['College', s4?.college ?? 'Not selected'],
       ['Major', s4?.major ?? 'Not selected'],
       ['Entry Term', s4?.entryTerm ?? 'Not selected'],
@@ -167,7 +172,15 @@ export function ReviewClient() {
 
           {!allComplete && (
             <div className="bg-destructive/10 border border-destructive/20 rounded-md p-4 text-sm text-destructive">
-              <strong>Incomplete sections:</strong> Please complete all four sections before proceeding.
+              <strong>Incomplete sections:</strong>
+              <ul className="mt-2 list-disc pl-5">
+                {sections.filter((section) => !section.complete).map((section) => (
+                  <li key={section.num}>
+                    Step {section.num} — {section.title}
+                    {section.issues.length > 0 && `: ${section.issues.join(', ')}`}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

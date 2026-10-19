@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { getSectionCompletionIssues } from '@/lib/application-validation';
 
 export function useApplication(sectionNum: number) {
   const searchParams = useSearchParams();
@@ -32,6 +33,13 @@ export function useApplication(sectionNum: number) {
 
   const save = async (complete = false, nextStep?: string) => {
     if (!app?.id) { toast.error('No application found'); return; }
+    if (complete) {
+      const issues = getSectionCompletionIssues(sectionNum, data);
+      if (issues.length > 0) {
+        toast.error(`Please complete: ${issues.join(', ')}.`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       const res = await fetch('/api/application', {
