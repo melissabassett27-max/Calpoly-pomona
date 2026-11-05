@@ -1,29 +1,13 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 const ALLPAYS_API_URL = 'https://api.allpays.co';
 const ALLPAYS_REQUEST_TIMEOUT_MS = 12_000;
 export const APPLICATION_FEE_USD = 90;
-
-export type AllPaysProvider = {
-  id: string;
-  name: string;
-  description: string;
-  notes: string;
-  logo: string;
-  status?: string;
-};
 
 type AllPaysResponse<T> = {
   success?: boolean;
   data?: T;
   error?: string;
-};
-
-type PaymentLink = {
-  payment_id: string;
-  currency: string;
-  amount: number | null;
-  amount_editable: boolean;
-  hosted_payment_url?: string;
-  status?: string;
 };
 
 const REGION_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
@@ -82,36 +66,6 @@ async function allPaysFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return result.data;
 }
 
-export function getAllPaysPaymentId(): string {
-  const paymentId = process.env.ALLPAYS_PAYMENT_ID?.trim();
-  if (!paymentId || !/^pay_[A-Za-z0-9]+$/.test(paymentId)) {
-    throw new Error('Set ALLPAYS_PAYMENT_ID in the project-root .env file to your active AllPays payment ID.');
-  }
-  return paymentId;
-}
-
-export async function getAllPaysPaymentLink(): Promise<PaymentLink> {
-  const paymentId = getAllPaysPaymentId();
-  const data = await allPaysFetch<{ payment: PaymentLink }>(
-    `/v1/payments/${encodeURIComponent(paymentId)}`,
-  );
-  const payment = data.payment;
-  if (!payment || payment.payment_id !== paymentId) {
-    throw new Error('AllPays returned an invalid payment link.');
-  }
-  if (payment.status !== undefined && payment.status !== 'active') {
-    throw new Error('This AllPays payment link is not active.');
-  }
-  if (
-    payment.currency !== 'USD'
-    || payment.amount !== APPLICATION_FEE_USD
-    || payment.amount_editable
-  ) {
-    throw new Error('The configured AllPays link must be fixed at exactly $90 USD.');
-  }
-  return payment;
-}
-
 export function toCountryCode(country: unknown): string | undefined {
   if (typeof country !== 'string') return undefined;
   const trimmed = country.trim();
@@ -148,33 +102,6 @@ export function toUsStateCode(state: unknown): string | undefined {
   return US_STATE_NAME_CODES.get(trimmed.toLowerCase());
 }
 
-export async function getAllPaysProviders(country?: string, state?: string): Promise<AllPaysProvider[]> {
-  const paymentId = getAllPaysPaymentId();
-  const [payment, data] = await Promise.all([
-    getAllPaysPaymentLink(),
-    allPaysFetch<{
-      available?: { payment_providers?: AllPaysProvider[] };
-    }>(`/v1/payments/${encodeURIComponent(paymentId)}/providers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept-Language': 'en' },
-      body: JSON.stringify({
-        mode: 'providers',
-        ...(country ? { country } : {}),
-        ...(country === 'US' && toUsStateCode(state) ? { state: toUsStateCode(state) } : {}),
-      }),
-    }),
-  ]);
-  if (payment.payment_id !== paymentId) {
-    throw new Error('AllPays returned a different payment link while loading providers.');
-  }
-
-  return (data.available?.payment_providers ?? []).filter((provider) => (
-    typeof provider.id === 'string'
-    && typeof provider.name === 'string'
-    && (provider.status === undefined || provider.status === 'active')
-  ));
-}
-
 function isValidPaymentReference(value: unknown): value is string {
   return typeof value === 'string'
     && value.length > 0
@@ -183,62 +110,191 @@ function isValidPaymentReference(value: unknown): value is string {
     && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
-export async function startAllPaysCheckout(
-  email: string,
-  provider: string,
-): Promise<{ checkoutUrl: string; payRequestHash: string; provider: string }> {
-  const payment = await getAllPaysPaymentLink();
-  const url = new URL(
-    `/v1/payments/${encodeURIComponent(payment.payment_id)}/pay`,
-    ALLPAYS_API_URL,
-  );
-  url.searchParams.set('email', email);
-  url.searchParams.set('provider', provider);
-
-  let response: Response;
+function getAllPaysHostedUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
   try {
-    response = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json', 'Accept-Language': 'en' },
-      signal: AbortSignal.timeout(ALLPAYS_REQUEST_TIMEOUT_MS),
-      cache: 'no-store',
-      redirect: 'manual',
-    });
+    const url = new URL(value);
+    if (
+      url.protocol === 'https:'
+      && (url.hostname === 'allpays.co' || url.hostname.endsWith('.allpays.co'))
+    ) {
+      return url.toString();
+    }
   } catch {
-    throw new Error('Could not start checkout with AllPays. Check the connection and try again.');
+    return undefined;
   }
+  return undefined;
+}
 
-  if (response.status >= 300 && response.status < 400) {
-    throw new Error('AllPays did not return a verifiable checkout session for this provider. Choose another provider or contact payment support.');
-  }
-  const result = await response.json().catch(() => null) as AllPaysResponse<{
-    checkout_url?: string;
-    pay_request_hash?: string;
-    provider?: string;
-  }> | null;
-  if (!response.ok || !result?.success || !result.data) {
-    throw new Error(result?.error || `AllPays returned HTTP ${response.status}.`);
-  }
-  const checkoutUrl = result.data.checkout_url;
-  const payRequestHash = result.data.pay_request_hash;
-  const selectedProvider = result.data.provider;
-  let checkoutProtocol: string | undefined;
+export function getAllPaysCallbackUrl(): string | undefined {
+  const configuredOrigin = process.env.ALLPAYS_CALLBACK_URL?.trim() || process.env.NEXTAUTH_URL?.trim();
+  if (!configuredOrigin) return undefined;
+
+  let callbackUrl: URL;
   try {
-    checkoutProtocol = checkoutUrl ? new URL(checkoutUrl).protocol : undefined;
+    callbackUrl = new URL('/api/payments/allpays/webhook', configuredOrigin);
   } catch {
-    checkoutProtocol = undefined;
+    throw new Error('NEXTAUTH_URL or ALLPAYS_CALLBACK_URL must be a valid public URL.');
+  }
+  if (process.env.NODE_ENV === 'production' && callbackUrl.protocol !== 'https:') {
+    throw new Error('The AllPays callback URL must use HTTPS in production.');
   }
   if (
-    typeof checkoutUrl !== 'string'
-    || checkoutProtocol !== 'https:'
-    || !isValidPaymentReference(payRequestHash)
-    || typeof selectedProvider !== 'string'
-    || !selectedProvider
+    process.env.NODE_ENV !== 'production'
+    && (callbackUrl.protocol !== 'https:' || ['localhost', '127.0.0.1', '::1'].includes(callbackUrl.hostname))
   ) {
-    throw new Error('AllPays did not return the payment reference needed to verify payment. Checkout was not opened; retry or contact payment support.');
+    return undefined;
+  }
+  return callbackUrl.toString();
+}
+
+export function verifyAllPaysCallbackSignature(
+  params: URLSearchParams,
+  timestamp: string,
+  signature: string,
+  paymentSecret: string,
+): boolean {
+  const canonicalQuery = [...params.entries()]
+    .sort(([keyA], [keyB]) => (keyA < keyB ? -1 : keyA > keyB ? 1 : 0))
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+  const expected = createHmac('sha256', paymentSecret)
+    .update(`${timestamp}\n${canonicalQuery}`)
+    .digest('hex');
+  const supplied = signature.startsWith('sha256=') ? signature.slice('sha256='.length) : signature;
+  if (!/^[a-fA-F0-9]{64}$/.test(supplied)) return false;
+
+  return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(supplied, 'hex'));
+}
+
+export async function createAllPaysHostedCheckout(
+  country: string,
+  state?: string,
+): Promise<{ paymentId: string; paymentSecret: string; checkoutUrl: string }> {
+  const polygonAddress = process.env.ALLPAYS_POLYGON_ADDRESS?.trim();
+  if (!polygonAddress || !/^0x[a-fA-F0-9]{40}$/.test(polygonAddress)) {
+    throw new Error('Set ALLPAYS_POLYGON_ADDRESS in the server environment to the USDC Polygon payout wallet.');
+  }
+  if (!/^[A-Z]{2}$/.test(country)) {
+    throw new Error('A valid applicant country is required to load payment methods.');
+  }
+  const callbackUrl = getAllPaysCallbackUrl();
+
+  const created = await allPaysFetch<{
+    payment_id?: string;
+    hosted_payment_url?: string;
+    payment_secret?: string;
+    currency?: string;
+    amount?: number | null;
+    amount_editable?: boolean;
+    fee_payer?: string;
+  }>('/v1/payments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      polygon_address: polygonAddress,
+      currency: 'USD',
+      amount: APPLICATION_FEE_USD,
+      amount_editable: false,
+      fee_payer: 'merchant',
+      ...(callbackUrl ? { callback_url: callbackUrl } : {}),
+    }),
+  });
+
+  const paymentId = created.payment_id;
+  const paymentSecret = created.payment_secret;
+  const checkoutUrl = getAllPaysHostedUrl(created.hosted_payment_url);
+  if (
+    typeof paymentId !== 'string'
+    || !isValidPaymentReference(paymentId)
+    || typeof paymentSecret !== 'string'
+    || !isValidPaymentReference(paymentSecret)
+    || !checkoutUrl
+    || created.currency !== 'USD'
+    || created.amount !== APPLICATION_FEE_USD
+    || created.amount_editable !== false
+    || created.fee_payer !== 'merchant'
+  ) {
+    throw new Error('AllPays did not return a valid hosted checkout link for the fixed $90 USD application fee.');
   }
 
-  return { checkoutUrl, payRequestHash, provider: selectedProvider };
+  const data = await allPaysFetch<{
+    available?: {
+      payment_methods?: Array<{ id?: string; name?: string }>;
+    };
+  }>(`/v1/payments/${encodeURIComponent(paymentId)}/providers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept-Language': 'en' },
+    body: JSON.stringify({
+      mode: 'methods',
+      country,
+      ...(country === 'US' && toUsStateCode(state) ? { state: toUsStateCode(state) } : {}),
+    }),
+  });
+
+  const paymentMethods = data.available?.payment_methods;
+  const hasCardOrBankMethod = Array.isArray(paymentMethods) && paymentMethods.some((method) => (
+    /card|credit|debit|bank|transfer|ach|sepa|apple[\s_-]?pay/i.test(
+      `${method.id ?? ''} ${method.name ?? ''}`,
+    )
+  ));
+  if (!hasCardOrBankMethod) {
+    throw new Error(`AllPays did not return a card, Apple Pay, or bank payment method for ${country}.`);
+  }
+
+  return { paymentId, paymentSecret, checkoutUrl };
+}
+
+export async function getAllPaysHostedAttempt(
+  paymentId: string,
+  paymentSecret: string,
+): Promise<{
+  pay_request_hash: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'completed' | 'timed_out';
+  amount_match?: { checkout?: string };
+} | null> {
+  if (!isValidPaymentReference(paymentId) || !isValidPaymentReference(paymentSecret)) {
+    throw new Error('The saved AllPays payment link credentials are invalid.');
+  }
+
+  const data = await allPaysFetch<{
+    payment?: { payment_id?: string };
+    latest_attempt?: {
+      pay_request_hash?: string;
+      amount?: number;
+      currency?: string;
+      status?: string;
+      amount_match?: { checkout?: string };
+    } | null;
+  }>(`/v1/payments/${encodeURIComponent(paymentId)}`, {
+    headers: { 'X-Payment-Secret': paymentSecret },
+  });
+
+  if (data.payment?.payment_id !== paymentId) {
+    throw new Error('AllPays returned a mismatched payment link.');
+  }
+  const attempt = data.latest_attempt;
+  if (attempt === undefined || attempt === null) return null;
+  const status = attempt.status;
+  if (
+    !isValidPaymentReference(attempt.pay_request_hash)
+    || typeof attempt.amount !== 'number'
+    || !Number.isFinite(attempt.amount)
+    || typeof attempt.currency !== 'string'
+    || (status !== 'pending' && status !== 'completed' && status !== 'timed_out')
+  ) {
+    throw new Error('AllPays returned invalid payment details for this hosted checkout.');
+  }
+
+  return {
+    pay_request_hash: attempt.pay_request_hash,
+    amount: attempt.amount,
+    currency: attempt.currency,
+    status,
+    amount_match: attempt.amount_match,
+  };
 }
 
 export async function getAllPaysAttempt(payRequestHash: string): Promise<{

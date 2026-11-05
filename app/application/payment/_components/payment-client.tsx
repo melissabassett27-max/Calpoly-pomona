@@ -8,28 +8,18 @@ import { SiteFooter } from '@/components/site-footer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  CreditCard, ArrowRight, Loader2, Info, ShieldCheck, AlertCircle, Mail, RefreshCw,
+  CreditCard, ArrowRight, Loader2, Info, ShieldCheck, AlertCircle, Mail,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApplicationStepper } from '../../_components/application-stepper';
 
-type PaymentProvider = {
-  id: string;
-  name: string;
-  description?: string;
-  notes?: string;
-};
-
 export function PaymentClient() {
   const router = useRouter();
   const [app, setApp] = useState<any>(null);
-  const [providers, setProviders] = useState<PaymentProvider[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState('');
   const [loading, setLoading] = useState(true);
-  const [providerError, setProviderError] = useState('');
+  const [paymentOptionsError, setPaymentOptionsError] = useState('');
   const [testMode, setTestMode] = useState(false);
   const [startingPayment, setStartingPayment] = useState(false);
-  const [retryingProviders, setRetryingProviders] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [hasStartedPayment, setHasStartedPayment] = useState(false);
@@ -42,7 +32,7 @@ export function PaymentClient() {
       try {
         const [appResponse, paymentResponse] = await Promise.all([
           fetch('/api/application', { signal: AbortSignal.timeout(20_000) }),
-          fetch('/api/payments/providers', { signal: AbortSignal.timeout(20_000) }),
+          fetch('/api/payment/allpays', { signal: AbortSignal.timeout(20_000) }),
         ]);
         const [appData, paymentData] = await Promise.all([
           appResponse.json(),
@@ -52,20 +42,11 @@ export function PaymentClient() {
         if (!active) return;
         setApp(appData);
 
-        if (!active) return;
+        if (!paymentResponse.ok) throw new Error(paymentData.error ?? 'Could not load payment options.');
         setTestMode(paymentData.testMode === true);
-        if (!paymentResponse.ok) {
-          setProviders([]);
-          setProviderError(paymentData.error ?? 'Could not load payment options.');
-          return;
-        }
-        const availableProviders = (paymentData.providers ?? []) as PaymentProvider[];
-        setProviders(availableProviders);
-        setSelectedProvider(availableProviders[0]?.id ?? '');
-        setProviderError(availableProviders.length > 0 ? '' : 'No payment providers are available right now.');
       } catch (error) {
         if (active) {
-          setProviderError(error instanceof Error ? error.message : 'Could not load your application or payment options.');
+          setPaymentOptionsError(error instanceof Error ? error.message : 'Could not load your application or payment options.');
         }
       } finally {
         if (active) setLoading(false);
@@ -76,33 +57,11 @@ export function PaymentClient() {
     return () => { active = false; };
   }, []);
 
-  const retryPaymentOptions = async () => {
-    setRetryingProviders(true);
-    try {
-      const response = await fetch('/api/payments/providers');
-      const data = await response.json();
-      setTestMode(data.testMode === true);
-      if (!response.ok) throw new Error(data.error ?? 'Could not load payment options.');
-      const availableProviders = (data.providers ?? []) as PaymentProvider[];
-      setProviders(availableProviders);
-      setSelectedProvider(availableProviders[0]?.id ?? '');
-      setProviderError(availableProviders.length > 0 ? '' : 'No payment providers are available right now.');
-    } catch (error) {
-      setProviders([]);
-      setProviderError(error instanceof Error ? error.message : 'Could not load payment options.');
-    } finally {
-      setRetryingProviders(false);
-    }
-  };
-
   const startPayment = async () => {
-    if (!selectedProvider) return;
     setStartingPayment(true);
     try {
-      const response = await fetch('/api/payments/start', {
+      const response = await fetch('/api/payment/allpays', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: selectedProvider }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -113,6 +72,9 @@ export function PaymentClient() {
           ].join(' '));
         }
         throw new Error(data.error ?? 'Could not start payment.');
+      }
+      if (typeof data.checkoutUrl !== 'string') {
+        throw new Error('AllPays did not return a valid checkout URL.');
       }
       setApplicationError('');
       setHasStartedPayment(true);
@@ -160,11 +122,7 @@ export function PaymentClient() {
 
       setApp(data.application);
       setApplicationError('');
-      if (data.emailSent) {
-        toast.success('Application submitted. Your receipt and application details were emailed to you.');
-      } else {
-        toast.error(data.emailError ?? 'Application submitted, but the receipt email could not be sent.');
-      }
+      toast.success('Application submitted successfully.');
       router.push('/application/receipt');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Submission failed. Please try again.');
@@ -210,7 +168,7 @@ export function PaymentClient() {
                   <div className="bg-blue-50 border border-blue-200 rounded-md p-4 flex gap-3">
                     <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                     <p className="text-sm text-blue-800">
-                      Your application is submitted only after AllPays confirms an exact $90 USD payment.
+                      Pay securely through AllPays using the credit/debit card, Apple Pay, or bank transfer methods available for your country. Your application is submitted only after AllPays confirms an exact $90 USD payment.
                     </p>
                   </div>
 
@@ -226,69 +184,24 @@ export function PaymentClient() {
                     </div>
                   )}
 
-                  {providerError && (
+                  {paymentOptionsError && (
                     <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900" role="alert">
                       <AlertCircle className="mr-2 inline h-4 w-4" />
-                      {providerError}
+                      {paymentOptionsError}
                     </div>
                   )}
 
-                  {providers.length === 0 && (
-                    <Button
-                      type="button"
-                      onClick={retryPaymentOptions}
-                      disabled={retryingProviders}
-                      variant="outline"
-                      className="w-full"
-                    >
-                      {retryingProviders
-                        ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking providers...</>
-                        : <><RefreshCw className="mr-2 h-4 w-4" />Retry payment options</>}
-                    </Button>
-                  )}
-
-                  {providers.length > 0 && (
-                    <div>
-                      <label htmlFor="payment-provider" className="mb-2 block text-sm font-medium">
-                        Choose a payment provider
-                      </label>
-                      <select
-                        id="payment-provider"
-                        value={selectedProvider}
-                        onChange={(event) => setSelectedProvider(event.target.value)}
-                        className="w-full rounded-md border border-input bg-background px-3 py-3 text-sm"
-                      >
-                        {providers.map((provider) => (
-                          <option key={provider.id} value={provider.id}>
-                            {provider.name}{provider.notes ? ` — ${provider.notes}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {providers.find((provider) => provider.id === selectedProvider)?.description && (
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {providers.find((provider) => provider.id === selectedProvider)?.description}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {providers.length > 0 ? (
-                    <Button
-                      onClick={startPayment}
-                      disabled={startingPayment || !selectedProvider}
-                      className="w-full bg-[#1E5631] hover:bg-[#245E36] text-white text-lg py-6 font-bold"
-                    >
-                      {startingPayment
-                        ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Starting secure checkout...</>
-                        : <>Pay $90 with AllPays <ArrowRight className="ml-2 h-5 w-5" /></>}
-                    </Button>
-                  ) : (
-                    <Button disabled className="w-full bg-[#1E5631] text-white text-lg py-6 font-bold">
-                      Payment checkout unavailable
-                    </Button>
-                  )}
+                  <Button
+                    onClick={startPayment}
+                    disabled={startingPayment}
+                    className="w-full bg-[#1E5631] hover:bg-[#245E36] text-white text-lg py-6 font-bold"
+                  >
+                    {startingPayment
+                      ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Starting secure checkout...</>
+                      : <>Pay $90 with AllPays <ArrowRight className="ml-2 h-5 w-5" /></>}
+                  </Button>
                   <p className="text-sm text-center text-[#1E5631]">
-                    Once your application is submitted successfully, we will email you the full application details and a link to your online-generated receipt.
+                    Once payment is verified, your application will be submitted. You can view and print your receipt from your account.
                   </p>
                   <p className="text-xs text-muted-foreground text-center">
                     You will continue to AllPays to complete payment. Returning to this page does not by itself confirm payment.
@@ -298,7 +211,7 @@ export function PaymentClient() {
                     <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4">
                       <p className="text-sm font-medium text-amber-950">Local test mode</p>
                       <p className="text-xs text-amber-900">
-                        Simulates a $90 payment without contacting AllPays or moving money. Testing submission still marks this application submitted in the configured database and may send its receipt email. Use only with a test application and a non-production database.
+                        Simulates a $90 payment without contacting AllPays or moving money. Testing submission still marks this application submitted in the configured database. Use only with a test application and a non-production database.
                       </p>
                       <Button
                         onClick={simulatePayment}

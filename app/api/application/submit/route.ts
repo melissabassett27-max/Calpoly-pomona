@@ -2,8 +2,12 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { APPLICATION_FEE_USD, getAllPaysAttempt, isLocalPaymentTestEnabled } from '@/lib/allpays';
-import { sendApplicationReceiptEmail } from '@/lib/application-email';
+import {
+  APPLICATION_FEE_USD,
+  getAllPaysAttempt,
+  getAllPaysHostedAttempt,
+  isLocalPaymentTestEnabled,
+} from '@/lib/allpays';
 import { prisma } from '@/lib/db';
 import { SAMPLE_ANNOUNCEMENTS } from '@/lib/constants';
 import { getApplicationCompletionIssues } from '@/lib/application-validation';
@@ -44,11 +48,18 @@ export async function POST(request: Request) {
         Number(payment.amount) === APPLICATION_FEE_USD && payment.currency === 'USD'
       ));
       const testPaymentVerified = isLocalPaymentTestEnabled() && eligiblePayments.some((payment) => (
-        payment.payRequestHash.startsWith('test_') && payment.status === 'completed'
+        payment.payRequestHash?.startsWith('test_') && payment.status === 'completed'
       ));
-      const allPaysPayments = eligiblePayments.filter((payment) => !payment.payRequestHash.startsWith('test_'));
+      const allPaysPayments = eligiblePayments.filter((payment) => !payment.payRequestHash?.startsWith('test_'));
+      const verifyPayment = (payment: (typeof allPaysPayments)[number]) => {
+        if (payment.allPaysPaymentId && payment.allPaysPaymentSecret) {
+          return getAllPaysHostedAttempt(payment.allPaysPaymentId, payment.allPaysPaymentSecret);
+        }
+        if (payment.payRequestHash) return getAllPaysAttempt(payment.payRequestHash);
+        throw new Error('The saved AllPays payment attempt has no verification reference.');
+      };
       const attemptResults = await Promise.allSettled(
-        allPaysPayments.map((payment) => getAllPaysAttempt(payment.payRequestHash)),
+        allPaysPayments.map(verifyPayment),
       );
       let paymentVerified = testPaymentVerified;
       let verificationUnavailable = false;
@@ -58,15 +69,22 @@ export async function POST(request: Request) {
         const payment = allPaysPayments[index];
         if (result.status === 'rejected') {
           verificationUnavailable = true;
-          console.error(`Could not verify AllPays attempt ${payment.payRequestHash}:`, result.reason);
+          console.error(
+            `Could not verify AllPays attempt ${payment.allPaysPaymentId ?? payment.payRequestHash}:`,
+            result.reason,
+          );
           continue;
         }
 
         const attempt = result.value;
+        if (!attempt) {
+          if (index === 0) latestPaymentStatus = 'pending';
+          continue;
+        }
         if (index === 0) latestPaymentStatus = attempt.status;
         await prisma.applicationPayment.update({
           where: { id: payment.id },
-          data: { status: attempt.status },
+          data: { payRequestHash: attempt.pay_request_hash, status: attempt.status },
         });
         if (
           attempt.status === 'completed'
@@ -119,27 +137,7 @@ export async function POST(request: Request) {
       return submitted;
     });
 
-    const personal = updated.section1Data as Record<string, unknown> | null;
-    const applicantEmail = typeof personal?.email === 'string' ? personal.email : session.user.email;
-    if (!applicantEmail) {
-      return NextResponse.json({
-        application: updated,
-        emailSent: false,
-        emailError: 'Application submitted, but no applicant email address is available for the receipt.',
-      });
-    }
-
-    try {
-      await sendApplicationReceiptEmail(updated, applicantEmail);
-      return NextResponse.json({ application: updated, emailSent: true });
-    } catch (error) {
-      console.error('Application submitted, but receipt email delivery failed:', error);
-      return NextResponse.json({
-        application: updated,
-        emailSent: false,
-        emailError: error instanceof Error ? error.message : 'Receipt email delivery failed.',
-      });
-    }
+    return NextResponse.json({ application: updated });
   } catch (error) {
     console.error('Failed to submit application:', error);
     return NextResponse.json(

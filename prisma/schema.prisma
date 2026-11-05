@@ -80,16 +80,19 @@ model Application {
 }
 
 model ApplicationPayment {
-  id              String      @id @default(cuid())
-  applicationId   String
-  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  payRequestHash  String      @unique
-  provider        String
-  amount          Decimal     @db.Decimal(10, 2)
-  currency        String
-  status          String      @default("pending")
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                   String      @id @default(cuid())
+  applicationId        String
+  application          Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  payRequestHash       String?     @unique
+  allPaysPaymentId     String?     @unique
+  allPaysPaymentSecret String?
+  hostedCheckoutUrl    String?
+  provider             String
+  amount               Decimal     @db.Decimal(10, 2)
+  currency             String
+  status               String      @default("pending")
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 
   @@index([applicationId, createdAt])
 }

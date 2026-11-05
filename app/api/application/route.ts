@@ -39,7 +39,11 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
       include: {
         documents: { orderBy: { uploadedAt: 'desc' } },
-        payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        payments: {
+          select: { id: true, provider: true, amount: true, currency: true, status: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
         portalStatus: true,
       },
     });
