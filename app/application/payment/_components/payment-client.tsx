@@ -20,6 +20,7 @@ export function PaymentClient() {
   const [paymentOptionsError, setPaymentOptionsError] = useState('');
   const [testMode, setTestMode] = useState(false);
   const [startingPayment, setStartingPayment] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [hasStartedPayment, setHasStartedPayment] = useState(false);
@@ -57,10 +58,11 @@ export function PaymentClient() {
     return () => { active = false; };
   }, []);
 
-  const startPayment = async () => {
+  const startPayment = async (checkBeforeRetry = false) => {
     setStartingPayment(true);
+    setCheckingPayment(checkBeforeRetry);
     try {
-      const response = await fetch('/api/payment/allpays', {
+      const response = await fetch(`/api/payment/allpays${checkBeforeRetry ? '?retry=true' : ''}`, {
         method: 'POST',
       });
       const data = await response.json();
@@ -74,14 +76,24 @@ export function PaymentClient() {
         throw new Error(data.error ?? 'Could not start payment.');
       }
       if (typeof data.checkoutUrl !== 'string') {
+        if (data.paymentConfirmed === true) {
+          setApp((current: any) => ({ ...current, paymentConfirmed: true }));
+          toast.success('AllPays confirms your payment. Choose VERIFY PAYMENT & SUBMIT to finish.');
+          return;
+        }
         throw new Error('AllPays did not return a valid checkout URL.');
       }
       setApplicationError('');
       setHasStartedPayment(true);
       window.location.assign(data.checkoutUrl);
     } catch (error) {
+      if (checkBeforeRetry) {
+        setApplicationError(error instanceof Error ? error.message : 'Could not check the AllPays payment status.');
+      }
       toast.error(error instanceof Error ? error.message : 'Could not start payment.');
+    } finally {
       setStartingPayment(false);
+      setCheckingPayment(false);
     }
   };
 
@@ -192,20 +204,56 @@ export function PaymentClient() {
                   )}
 
                   <Button
-                    onClick={startPayment}
+                    onClick={() => startPayment()}
                     disabled={startingPayment}
                     className="w-full bg-[#1E5631] hover:bg-[#245E36] text-white text-lg py-6 font-bold"
                   >
                     {startingPayment
-                      ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Starting secure checkout...</>
+                      ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" />{checkingPayment ? 'Checking payment status...' : 'Starting secure checkout...'}</>
                       : <>Pay $90 with AllPays <ArrowRight className="ml-2 h-5 w-5" /></>}
                   </Button>
+                  {hasPaymentAttempt && !app?.paymentConfirmed && (
+                    <div className="space-y-2">
+                      <Button
+                        type="button"
+                        onClick={() => startPayment(true)}
+                        disabled={startingPayment}
+                        variant="outline"
+                        className="w-full"
+                      >
+                        {checkingPayment
+                          ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking with AllPays...</>
+                          : 'Payment failed? Check status & retry'}
+                      </Button>
+                      <p className="text-center text-xs text-muted-foreground">
+                        We check the existing payment first. A new checkout is offered only after AllPays reports that attempt timed out.
+                      </p>
+                    </div>
+                  )}
                   <p className="text-sm text-center text-[#1E5631]">
                     Once payment is verified, your application will be submitted. You can view and print your receipt from your account.
                   </p>
                   <p className="text-xs text-muted-foreground text-center">
                     You will continue to AllPays to complete payment. Returning to this page does not by itself confirm payment.
                   </p>
+
+                  <div className="rounded-md border-2 border-[#1E5631]/20 bg-white p-4 shadow-sm">
+                    <h2 className="flex items-center gap-2 font-semibold text-[#1E5631]">
+                      <Mail className="h-5 w-5" /> Payment help or manual payment
+                    </h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      If your card or bank payment did not go through, or you need to pay manually, email our payment team for help and instructions. Keep your payment receipt to present during admission, and ask the team if you need a receipt copy.
+                    </p>
+                    <a
+                      className="mt-3 inline-block font-semibold text-[#1E5631] underline"
+                      href="mailto:CalPolyPayments@aielevategroup.top?subject=Application%20payment%20help"
+                    >
+                      CalPolyPayments@aielevategroup.top
+                    </a>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      We aim to reply within 5 minutes.
+                    </p>
+                  </div>
 
                   {testMode && (
                     <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4">

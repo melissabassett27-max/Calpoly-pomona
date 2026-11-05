@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import {
   APPLICATION_FEE_USD,
   createAllPaysHostedCheckout,
+  getAllPaysHostedAttempt,
   isLocalPaymentTestEnabled,
   toCountryCode,
   toUsStateCode,
@@ -24,7 +25,7 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const session = await auth();
     if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -52,23 +53,70 @@ export async function POST() {
       return NextResponse.json({ error: 'Enter a valid country in your personal information before payment.' }, { status: 400 });
     }
 
+    const retryRequested = new URL(request.url).searchParams.get('retry') === 'true';
     const pendingPayment = await prisma.applicationPayment.findFirst({
       where: { applicationId: application.id, status: { in: ['creating', 'pending'] } },
       orderBy: { createdAt: 'desc' },
     });
     if (pendingPayment) {
+      if (pendingPayment.status === 'creating') {
+        return NextResponse.json({
+          error: 'Your AllPays checkout is still being prepared. Please wait a moment and try again.',
+        }, { status: 409 });
+      }
+
       if (
-        pendingPayment.hostedCheckoutUrl
-        && pendingPayment.allPaysPaymentId
-        && pendingPayment.allPaysPaymentSecret
+        !pendingPayment.hostedCheckoutUrl
+        || !pendingPayment.allPaysPaymentId
+        || !pendingPayment.allPaysPaymentSecret
       ) {
+        return NextResponse.json({
+          error: 'This payment attempt is missing its AllPays checkout details. Contact payment support before trying again.',
+        }, { status: 409 });
+      }
+
+      if (!retryRequested) {
         return NextResponse.json({ checkoutUrl: pendingPayment.hostedCheckoutUrl });
       }
-      return NextResponse.json({
-        error: pendingPayment.status === 'creating'
-          ? 'Your AllPays checkout is still being prepared. Please wait a moment and try again.'
-          : 'A payment attempt is already in progress. Return from the existing checkout and choose VERIFY PAYMENT & SUBMIT before starting another payment.',
-      }, { status: 409 });
+
+      const attempt = await getAllPaysHostedAttempt(
+        pendingPayment.allPaysPaymentId,
+        pendingPayment.allPaysPaymentSecret,
+      );
+      if (!attempt) {
+        return NextResponse.json({ checkoutUrl: pendingPayment.hostedCheckoutUrl });
+      }
+
+      await prisma.applicationPayment.update({
+        where: { id: pendingPayment.id },
+        data: { payRequestHash: attempt.pay_request_hash, status: attempt.status },
+      });
+
+      if (attempt.status === 'pending') {
+        return NextResponse.json({
+          error: 'AllPays still shows this payment as pending. Finish or cancel the checkout there, then check again. Do not start another payment while it is pending.',
+          paymentStatus: 'pending',
+        }, { status: 409 });
+      }
+
+      if (attempt.status === 'completed') {
+        if (
+          attempt.amount !== APPLICATION_FEE_USD
+          || attempt.currency !== 'USD'
+          || attempt.amount_match?.checkout !== 'exact'
+        ) {
+          return NextResponse.json({
+            error: 'AllPays shows a completed payment, but it does not match the exact $90 USD application fee. Contact payment support before making another payment.',
+            paymentStatus: 'completed',
+          }, { status: 409 });
+        }
+
+        await prisma.application.update({
+          where: { id: application.id },
+          data: { paymentConfirmed: true },
+        });
+        return NextResponse.json({ paymentConfirmed: true });
+      }
     }
 
     let payment: Awaited<ReturnType<typeof prisma.applicationPayment.create>>;
