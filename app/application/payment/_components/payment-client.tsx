@@ -51,7 +51,7 @@ export function PaymentClient() {
   const s4 = app?.section4Data ?? {};
   const applicationReference = typeof app?.id === 'string' ? app.id : '';
   const verificationEmailUrl = applicationReference
-    ? `mailto:CalPolyPayments@aielevategroup.top?cc=${encodeURIComponent('CalpolyPomonaSupport@aielevategroup.top')}&subject=${encodeURIComponent(`Document verification and payment - Application ${applicationReference}`)}&body=${encodeURIComponent(`Hello Admissions and Payments Team,\n\nI am requesting document verification and official payment instructions.\n\nApplication reference: ${applicationReference}\n\nPlease let me know if you need any additional information or physical documents.\n\nThank you.`)}`
+    ? `mailto:CalPolyPayments@aielevategroup.top?subject=${encodeURIComponent(`Document verification and payment - Application ${applicationReference}`)}&body=${encodeURIComponent(`Hello Payments Team,\n\nI am requesting document verification and official payment instructions.\n\nApplication reference: ${applicationReference}\n\nPlease review my application documents and let me know the next steps. I can add any additional information here before sending this email.\n\nThank you.`)}`
     : '';
 
   return (
@@ -95,19 +95,27 @@ export function PaymentClient() {
                     </div>
                   </div>
 
-                  <Button
-                    type="button"
-                    disabled={!verificationEmailUrl}
-                    onClick={() => {
-                      if (verificationEmailUrl) window.location.href = verificationEmailUrl;
-                    }}
-                    className="w-full bg-[#1E5631] hover:bg-[#245E36] text-white text-lg py-6 font-bold"
-                  >
-                    <Mail className="h-5 w-5" /> Submit details for verification
-                  </Button>
+                  {verificationEmailUrl ? (
+                    <Button
+                      asChild
+                      className="w-full bg-[#1E5631] hover:bg-[#245E36] text-white text-lg py-6 font-bold"
+                    >
+                      <a href={verificationEmailUrl}>
+                        <Mail className="h-5 w-5" /> Submit details for verification
+                      </a>
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      disabled
+                      className="w-full bg-[#1E5631] text-white text-lg py-6 font-bold"
+                    >
+                      <Mail className="h-5 w-5" /> Submit details for verification
+                    </Button>
+                  )}
 
                   <p className="text-sm text-center text-[#1E5631]">
-                    This opens a draft addressed to the school team. Check it, add any details or requested attachments, and press Send in your email app. Your email is not sent automatically.
+                    This opens an email draft addressed to the payments inbox. Add any information that is missing, attach documents if needed, and press Send in your email app. Your email is not sent automatically.
                   </p>
                   <p className="text-xs text-muted-foreground text-center">
                     Application reference: <span className="font-medium">{applicationReference || 'Loading...'}</span>
