@@ -8,7 +8,7 @@ import { SiteFooter } from '@/components/site-footer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  CreditCard, ArrowRight, Loader2, Info, ShieldCheck, AlertCircle, Mail,
+  CreditCard, Loader2, Info, ShieldCheck, AlertCircle, Mail,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ApplicationStepper } from '../../_components/application-stepper';
@@ -177,10 +177,10 @@ export function PaymentClient() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-md p-4 flex gap-3">
-                    <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-                    <p className="text-sm text-blue-800">
-                      Pay securely through AllPays using the credit/debit card, Apple Pay, or bank transfer methods available for your country. Your application is submitted only after AllPays confirms an exact $90 USD payment.
+                  <div className="bg-amber-50 border border-amber-200 rounded-md p-4 flex gap-3">
+                    <Info className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-900">
+                      All payments are processed directly to the school account only after admissions staff review your submitted documents and confirm your application status. Due to recent cyber incidents and document fraud concerns, all admissions verification is manual. Applicants are not required to pay until the school has reviewed the documents and sent the official payment instructions by email. This protects applicants and helps ensure that by the time payment is made, the applicant is already confident the admissions process is valid and verified.
                     </p>
                   </div>
 
@@ -203,55 +203,56 @@ export function PaymentClient() {
                     </div>
                   )}
 
+                  <div className="rounded-md border border-slate-200 bg-slate-100 p-4 opacity-60">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-500">Stripe</p>
+                        <p className="text-xs text-slate-500">Previously used for online payment processing</p>
+                      </div>
+                      <span className="rounded-full border border-slate-300 bg-slate-200 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                        Unavailable
+                      </span>
+                    </div>
+                  </div>
+
                   <Button
                     onClick={() => startPayment()}
-                    disabled={startingPayment}
-                    className="w-full bg-[#1E5631] hover:bg-[#245E36] text-white text-lg py-6 font-bold"
+                    disabled={startingPayment || checkingPayment}
+                    className="w-full bg-slate-300 text-slate-500 text-lg py-6 font-bold cursor-not-allowed"
                   >
-                    {startingPayment
-                      ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" />{checkingPayment ? 'Checking payment status...' : 'Starting secure checkout...'}</>
-                      : <>Pay $90 with AllPays <ArrowRight className="ml-2 h-5 w-5" /></>}
+                    Payment instructions sent after admissions review
                   </Button>
-                  {hasPaymentAttempt && !app?.paymentConfirmed && (
-                    <div className="space-y-2">
-                      <Button
-                        type="button"
-                        onClick={() => startPayment(true)}
-                        disabled={startingPayment}
-                        variant="outline"
-                        className="w-full"
-                      >
-                        {checkingPayment
-                          ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking with AllPays...</>
-                          : 'Payment failed? Check status & retry'}
-                      </Button>
-                      <p className="text-center text-xs text-muted-foreground">
-                        We check the existing payment first. A new checkout is offered only after AllPays reports that attempt timed out.
-                      </p>
-                    </div>
-                  )}
+
                   <p className="text-sm text-center text-[#1E5631]">
-                    Once payment is verified, your application will be submitted. You can view and print your receipt from your account.
+                    Payment will only be requested after admissions staff have reviewed your documents and sent the official school payment instructions. Any receipt will be sent to you by email from the school payment or admissions office.
                   </p>
                   <p className="text-xs text-muted-foreground text-center">
-                    You will continue to AllPays to complete payment. Returning to this page does not by itself confirm payment.
+                    No direct online payment is active at this time. All payment communication must be through official school emails only.
                   </p>
 
                   <div className="rounded-md border-2 border-[#1E5631]/20 bg-white p-4 shadow-sm">
                     <h2 className="flex items-center gap-2 font-semibold text-[#1E5631]">
-                      <Mail className="h-5 w-5" /> Payment help or manual payment
+                      <Mail className="h-5 w-5" /> Admissions and payment support
                     </h2>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      If your card or bank payment did not go through, or you need to pay manually, email our payment team for help and instructions. Keep your payment receipt to present during admission, and ask the team if you need a receipt copy.
+                      Payment and document-related communication must be carried out through the official school emails below. We do not offer live chat or direct messaging with staff through personal emails. If your documents cannot be verified online, you will be asked to submit them physically.
                     </p>
-                    <a
-                      className="mt-3 inline-block font-semibold text-[#1E5631] underline"
-                      href="mailto:CalPolyPayments@aielevategroup.top?subject=Application%20payment%20help"
-                    >
-                      CalPolyPayments@aielevategroup.top
-                    </a>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      We aim to reply within 5 minutes.
+                    <div className="mt-3 space-y-2 text-sm">
+                      <a className="block font-semibold text-[#1E5631] underline" href="mailto:CalPolyPayments@aielevategroup.top?subject=Application%20payment%20verification">
+                        CalPolyPayments@aielevategroup.top
+                      </a>
+                      <a className="block font-semibold text-[#1E5631] underline" href="mailto:accounts@aielevategroup.top?subject=Manual%20school%20payment%20instructions">
+                        accounts@aielevategroup.top
+                      </a>
+                      <a className="block font-semibold text-[#1E5631] underline" href="mailto:CalpolyPomonaSupport@aielevategroup.top?subject=Admissions%20document%20verification">
+                        CalpolyPomonaSupport@aielevategroup.top
+                      </a>
+                      <a className="block font-semibold text-[#1E5631] underline" href="mailto:info@aielevategroup.top?subject=Admissions%20information">
+                        info@aielevategroup.top
+                      </a>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Replies are handled by the school team and generally respond within 5 minutes during active office support hours.
                     </p>
                   </div>
 
@@ -288,7 +289,7 @@ export function PaymentClient() {
                     )}
                   </Button>
                   <p className="text-xs text-muted-foreground text-center">
-                    After paying, return here and choose verify payment. We check directly with AllPays before submission.
+                    Once admissions staff send the official school payment instructions and you complete the payment to the school account, return to this page and use the verification steps provided by the admissions team. Payment receipts are sent by email from the official school accounts above.
                   </p>
 
                   <div className="rounded-md border bg-muted/30 p-4">
